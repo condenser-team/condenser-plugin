@@ -1,11 +1,5 @@
 /// <reference lib="dom" />
 import { useState, useEffect } from 'react';
-import {
-  useSend,
-  navigate, back,
-  showToast, showModal, showContextMenu,
-  Focusable, Menu, MenuItem,
-} from 'condenser:api';
 
 // ---- Plugin identity ----
 // key must be unique across all installed plugins and match the directory name.
@@ -15,12 +9,32 @@ export const title = 'Condenser Plugin';
 // The route condenser will register for your main page inside Big Picture Mode.
 export const route = '/condenser-plugin/home';
 
+// ---- Condenser API ----
+// All methods live on window.condenser, injected by condenser-app before plugins load.
+const { navigate, back }                                                   = condenser.nav;
+const { showToast, showModal, showContextMenu, Focusable, Menu, MenuItem } = condenser.ui;
+const { createStyleToggle }                                                = condenser.css;
+
+// ---- Module-level styling state ----
+// Lives outside React so it survives Page unmount/remount when navigating away and back.
+const style = createStyleToggle(key, `.Panel { border-radius: 10px; overflow: hidden; }`);
+
+// ---- Lifecycle ----
+export function onMount(): void {}
+
+// Called by Condenser before the plugin is unloaded, disabled, or hot-reloaded.
+export function onUnmount(): void {
+  style.disable();
+}
+
 // ---- Page ----
 // Full-screen page shown when the user opens your plugin.
 export function Page(_: { websocketUrl: string }) {
-  const send = useSend(key);
+  const send = condenser.plugin.useSend(key);
   const [count, setCount] = useState(0);
   const [info, setInfo] = useState<{ platform: string; uptime: number; memory: number } | null>(null);
+  // Initialise from module-level var so state is correct after navigating back to this page.
+  const [stylingEnabled, setStylingEnabled] = useState(() => style.enabled);
 
   useEffect(() => {
     send('getCount').then((r: any) => setCount(r.count));
@@ -34,12 +48,12 @@ export function Page(_: { websocketUrl: string }) {
 
   const handleToast = () => showToast({
     title,
-    body: 'showToast() called from condenser:api.',
+    body: 'showToast() called from condenser.ui.',
     duration: 4000,
   });
 
   const handleModal = () => showModal(
-    <p>Opened via showModal() from condenser:api.</p>,
+    <p>Opened via showModal() from condenser.ui.</p>,
     undefined,
     { strTitle: 'Modal component' },
   );
@@ -53,6 +67,11 @@ export function Page(_: { websocketUrl: string }) {
       </Menu>,
       e.currentTarget,
     );
+  };
+
+  const handleToggleStyling = () => {
+    style.enabled ? style.disable() : style.enable();
+    setStylingEnabled(style.enabled);
   };
 
   const fmt = (s: number) => `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
@@ -72,6 +91,9 @@ export function Page(_: { websocketUrl: string }) {
         </button>
         <button className="DialogButton _DialogLayout Secondary" onClick={handleModal}>Show Modal</button>
         <button className="DialogButton _DialogLayout Secondary" onClick={handleToast}>Show Toast</button>
+        <button className="DialogButton _DialogLayout Secondary" onClick={handleToggleStyling}>
+          {stylingEnabled ? 'Disable styling' : 'Enable styling'}
+        </button>
         {info && (
           <div style={{ fontSize: 12, color: 'var(--gpSystemLighterGrey)', paddingTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span>Platform: {info.platform}</span>

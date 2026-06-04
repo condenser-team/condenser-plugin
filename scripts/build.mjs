@@ -3,8 +3,9 @@
  * Standalone production build for a condenser plugin.
  * Produces dist/frontend.js and dist/backend.mjs — both ESM.
  *
- * condenser:api, react, and react/jsx-runtime are resolved to the shims
- * bundled in this repo so the output is self-contained.
+ * React imports are aliased to condenser-app's library/react.ts so the plugin
+ * uses Steam's webpack-bundled React rather than bundling its own copy.
+ * All condenser API calls go through window.condenser (no shims needed).
  */
 import { build } from 'esbuild';
 import { mkdirSync } from 'fs';
@@ -13,14 +14,14 @@ import path from 'path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
+const libraryDir = path.resolve(__dirname, '../../condenser-app/frontend/library');
 
 mkdirSync(path.join(root, 'dist'), { recursive: true });
 
-const shimAlias = {
-  'condenser:api':      path.join(root, 'shims/condenser-api.ts'),
-  'react':              path.join(root, 'shims/react.ts'),
-  'react/jsx-runtime':  path.join(root, 'shims/react-jsx.ts'),
-  'react/jsx-dev-runtime': path.join(root, 'shims/react-jsx.ts'),
+const reactAlias = {
+  'react':                 path.join(libraryDir, 'react.ts'),
+  'react/jsx-runtime':     path.join(libraryDir, 'react-jsx.ts'),
+  'react/jsx-dev-runtime': path.join(libraryDir, 'react-jsx.ts'),
 };
 
 await build({
@@ -29,7 +30,7 @@ await build({
   format: 'esm',
   target: 'esnext',
   outfile: path.join(root, 'dist/frontend.js'),
-  alias: shimAlias,
+  alias: reactAlias,
 });
 
 await build({

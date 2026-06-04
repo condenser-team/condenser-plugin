@@ -5,10 +5,7 @@
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
     "strict": true,
-    "noEmit": true,
-    "paths": {
-      "condenser:api": ["./types/condenser-api.d.ts"]
-    }
+    "noEmit": true
   },
-  "include": ["*.tsx", "*.ts"]
+  "include": ["*.tsx", "*.ts", "types/*.d.ts"]
 }

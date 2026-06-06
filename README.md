@@ -58,8 +58,8 @@ CONDENSER_APP_PATH=/path/to/condenser-app npm run dev
 my-plugin/
 ├── frontend.tsx    # React UI injected into Steam's Big Picture Mode
 ├── backend.ts      # Node.js backend — exports become RPC actions
-├── shims/          # Runtime bridges (condenser:api, react) used for release builds
-├── types/          # TypeScript declarations for condenser:api
+├── types/
+│   └── condenser.d.ts   # TypeScript global for window.condenser (from condenser-app)
 └── scripts/
     ├── dev.mjs     # Starts condenser-app with this plugin loaded
     └── build.mjs   # Standalone production build (used by release workflow)
@@ -76,13 +76,29 @@ Export any combination of these from `frontend.tsx`:
 | `Panel` | Content inside the quick-access panel |
 | `Persistent` | Always-visible overlay rendered on every screen |
 
+### Plugin API (`window.condenser`)
+
+Condenser injects a `condenser` global into Steam's browser context before any plugin loads. Access the full API by destructuring from it — no imports needed.
+
+```ts
+// At module top-level (outside any component)
+const { navigate, back }                    = condenser.nav;
+const { showToast, showModal, Focusable }   = condenser.ui;
+const { createStyleToggle }                 = condenser.css;
+
+// Inside a component (React hook)
+const send = condenser.plugin.useSend(key);
+```
+
+TypeScript types are provided automatically via `types/condenser.d.ts`, which imports `CondenserNamespace` directly from condenser-app so types stay in sync without manual maintenance.
+
 ### Backend actions
 
-Every exported `async function` in `backend.ts` becomes a callable action. Call them from the frontend with `useSend`:
+Every exported `async function` in `backend.ts` becomes a callable action. Call them from the frontend with `condenser.plugin.useSend`:
 
 ```ts
 // frontend.tsx
-const send = useSend('my-plugin');
+const send = condenser.plugin.useSend('my-plugin');
 const result = await send('myAction', { value: 42 });
 
 // backend.ts
@@ -91,7 +107,23 @@ export async function myAction(data: { value: number }) {
 }
 ```
 
-### Lifecycle hooks
+### Frontend lifecycle hooks
+
+Export `onMount` and `onUnmount` alongside your surfaces. Condenser calls them automatically — `onUnmount` is guaranteed to fire before any disable or hot-reload.
+
+```ts
+// frontend.tsx
+export function onMount(): void {
+  // plugin enabled or first load
+}
+
+export function onUnmount(): void {
+  // plugin disabled or hot-reloaded — clean up CSS, patches, timers
+  style.disable();
+}
+```
+
+### Backend lifecycle hooks
 
 ```ts
 // backend.ts
@@ -103,6 +135,58 @@ export async function onUnload() {
   // called when condenser shuts down
 }
 ```
+
+### CSS injection
+
+Use `condenser.css` to inject styles into Steam windows. Styles are always JavaScript objects — never raw CSS strings.
+
+Two source formats are accepted:
+
+- **`StyleProperties`** — flat camelCase property bag applied to the target element  
+  `{ borderRadius: '10px', color: 'white' }`
+- **`StyleSheet`** — map of CSS selector → property bag; selectors are automatically scoped when a section target is used  
+  `{ '.Panel': { borderRadius: '10px' }, '.Header': { color: 'white' } }`
+
+```ts
+const { inject, createStyleToggle, createStyleVars, Target } = condenser.css;
+
+// createStyleToggle — recommended for enable/disable patterns
+const style = createStyleToggle(
+  'my-plugin',
+  { outline: '3px solid #ff6b6b', outlineOffset: '-3px' },
+  { window: Target.BigPicture, scope: '#header' }, // stable cross-platform selector
+);
+style.enable();
+style.disable();
+console.log(style.enabled); // boolean
+
+export function onUnmount() { style.disable(); }
+
+// inject — one-shot, returns a cleanup function
+const remove = inject('my-plugin',
+  { fontFamily: 'Inter, sans-serif' },
+  Target.Global, // BigPicture + MainMenu + QuickAccess
+);
+// later: remove();
+
+// createStyleVars — live-updatable CSS custom properties
+const vars = createStyleVars('my-plugin', { '--accent': '#4fc3f7' }, Target.BigPicture);
+vars.update({ '--accent': '#ff6b6b' });
+vars.remove();
+```
+
+**Targets** — pass as the third argument to any CSS function:
+
+| Target | Scope |
+|--------|-------|
+| `Target.BigPicture` | Main BPM window |
+| `Target.QuickAccess` | Quick Access Menu popup |
+| `Target.MainMenu` | Steam button overlay |
+| `Target.Global` | BigPicture + MainMenu + QuickAccess |
+| `Target.Library`, `Target.Home`, `Target.Settings`, … | Section-scoped (SteamOS only) |
+| `{ window: Target.BigPicture, scope: '#Main' }` | Custom selector — works on all platforms |
+
+Injected `<style>` elements are tagged with `data-condenser-plugin="my-plugin"` for easy DevTools inspection.
 
 ## Publishing a release
 
@@ -133,9 +217,20 @@ Open a pull request to [condenser-registry](https://github.com/condenser-team/co
 
 Once a maintainer merges your PR, your plugin appears in the Condenser plugin browser and can be installed by any user.
 
-## condenser:api reference
+## condenser API reference
 
-See [`types/condenser-api.d.ts`](types/condenser-api.d.ts) for the full typed API surface including navigation, toasts, modals, context menus, and Steam UI components (`Focusable`, `Tabs`, `SidebarNavigation`).
+See [`types/condenser.d.ts`](types/condenser.d.ts) for the full typed API — it re-exports `CondenserNamespace` directly from condenser-app so it always reflects the real implementation.
+
+Key namespaces:
+
+| Namespace | Description |
+|---|---|
+| `condenser.nav` | `navigate`, `back`, `openQAM`, `openSideMenu`, `closeSideMenus` |
+| `condenser.plugin` | `useSend(pluginId)`, `useMessage(pluginId, event, handler)` |
+| `condenser.ui` | `showToast`, `showModal`, `showContextMenu`, `Focusable`, `SidebarNavigation`, `Tabs`, `Menu`, `MenuItem` |
+| `condenser.css` | `inject`, `createStyleToggle`, `createStyleVars`, `Target` |
+| `condenser.steam` | `classes` (resolved CSS class names), `resetClasses` |
+| `condenser.events` | `UIMode`, `getUIMode`, `onUIModeChanged`, `useQAMVisible` |
 
 ## License
 
